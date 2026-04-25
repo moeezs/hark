@@ -1,10 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRecording } from './hooks/useRecording'
 import Sidebar from './components/Sidebar'
 import PendingSection from './components/PendingSection'
 import NotesSection from './components/NotesSection'
 import PeopleSection from './components/PeopleSection'
 import TopicsSection from './components/TopicsSection'
 import SearchSection from './components/SearchSection'
+
+function actionForType(type) {
+  switch (type) {
+    case 'event':   return 'Add to Calendar'
+    case 'task':    return 'Add to Reminders'
+    case 'message': return 'Draft Message'
+    default:        return 'Save to Notes'
+  }
+}
 
 const INITIAL_PENDING = [
   {
@@ -35,10 +45,47 @@ const INITIAL_PENDING = [
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('notes')
-  const [isListening, setIsListening] = useState(true)
+  const [isListening, setIsListening] = useState(false)
   const [pendingCards, setPendingCards] = useState(INITIAL_PENDING)
   const [removingIds, setRemovingIds] = useState(new Set())
   const [confirmedIds, setConfirmedIds] = useState(new Set())
+
+  // Recording hook — starts/stops mic, sends audio to sidecar, surfaces items
+  const { startRecording, stopRecording, isProcessing, error: recordingError } = useRecording({
+    onItemsExtracted: useCallback((items, _transcript) => {
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const newCards = items.map((item, i) => ({
+        id:     Date.now() + i,
+        title:  item.title,
+        type:   item.type || 'note',
+        meta:   `Caught at ${timeStr} · Today`,
+        quote:  item.quote || '',
+        action: actionForType(item.type),
+      }))
+      setPendingCards((prev) => [...newCards, ...prev])
+      setActiveSection('pending')
+    }, []),
+  })
+
+  // Sync isListening state → actual mic recording
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    if (isListening) {
+      startRecording().catch((err) => {
+        console.error('[hark] mic error:', err.message)
+        setIsListening(false)
+        if (window.__TAURI__) {
+          window.__TAURI__.tauri.invoke('set_listening', { listening: false }).catch(() => {})
+        }
+      })
+    } else {
+      stopRecording()
+    }
+  }, [isListening])
 
   // Listen for tray toggle events from Rust
   useEffect(() => {
@@ -48,12 +95,8 @@ export default function App() {
       .listen('listening-changed', (event) => {
         setIsListening(event.payload)
       })
-      .then((fn) => {
-        unlisten = fn
-      })
-    return () => {
-      if (unlisten) unlisten()
-    }
+      .then((fn) => { unlisten = fn })
+    return () => { if (unlisten) unlisten() }
   }, [])
 
   const handleToggleListening = async () => {
@@ -100,6 +143,8 @@ export default function App() {
         isListening={isListening}
         onToggleListening={handleToggleListening}
         pendingCount={pendingCards.length}
+        isProcessing={isProcessing}
+        recordingError={recordingError}
       />
       <main className="flex-1 flex flex-col min-h-0 bg-hark-bg">
         {activeSection === 'pending' && (
