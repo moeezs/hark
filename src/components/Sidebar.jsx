@@ -63,8 +63,8 @@ export default function Sidebar({ activeSection, setActiveSection, isListening, 
   return (
     <aside className="w-[212px] min-w-[212px] h-screen bg-hark-surface border-r border-hark-border flex flex-col overflow-hidden">
 
-      {/* Logo — pt-11 = 44px for macOS titlebar overlay */}
-      <div className="flex items-center gap-2 px-[18px] pb-4 pt-11">
+      {/* Logo — pt-11 = 44px for macOS titlebar overlay; drag-region lets user drag window from this empty padding */}
+      <div className="flex items-center gap-2 px-[18px] pb-4 pt-11" data-tauri-drag-region>
         <img src="/icon.png" width="26" height="26" alt="Hark" className="rounded-[6px] object-contain" />
         <span className="text-[17px] font-semibold tracking-[-0.4px] text-hark-teal">hark</span>
       </div>
