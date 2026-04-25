@@ -59,7 +59,7 @@ const NAV_GROUPS = [
   },
 ]
 
-export default function Sidebar({ activeSection, setActiveSection, isListening, onToggleListening, pendingCount }) {
+export default function Sidebar({ activeSection, setActiveSection, isListening, onToggleListening, pendingCount, isProcessing, recordingError }) {
   return (
     <aside className="w-[212px] min-w-[212px] h-screen bg-hark-surface border-r border-hark-border flex flex-col overflow-hidden">
 
@@ -69,18 +69,39 @@ export default function Sidebar({ activeSection, setActiveSection, isListening, 
         <span className="text-[17px] font-semibold tracking-[-0.4px] text-hark-teal">hark</span>
       </div>
 
-      {/* Status pill */}
-      <div className="mx-3 mb-1 px-[11px] py-2 bg-hark-teal-soft border border-hark-teal-border rounded-[9px] flex items-center gap-[7px]">
+      {/* Status pill — color shifts with listening / analyzing / paused state */}
+      <div className={[
+        'mx-3 mb-1 px-[11px] py-2 rounded-[9px] border flex items-center gap-[7px]',
+        isProcessing
+          ? 'bg-[#FFFBEB] border-[#FDE68A]'
+          : isListening
+          ? 'bg-hark-teal-soft border-hark-teal-border'
+          : 'bg-hark-bg border-hark-border',
+      ].join(' ')}>
         <span
           className={[
             'w-[6px] h-[6px] rounded-full flex-shrink-0',
-            isListening ? 'bg-hark-teal animate-pulse-status' : 'bg-hark-muted-light',
+            isProcessing
+              ? 'bg-[#D97706] animate-pulse'
+              : isListening
+              ? 'bg-hark-teal animate-pulse-status'
+              : 'bg-hark-muted-light',
           ].join(' ')}
         />
-        <span className={['text-xs font-medium flex-1', isListening ? 'text-hark-teal-dark' : 'text-hark-muted'].join(' ')}>
-          {isListening ? 'Listening' : 'Paused'}
+        <span className={[
+          'text-xs font-medium flex-1',
+          isProcessing ? 'text-[#92400E]' : isListening ? 'text-hark-teal-dark' : 'text-hark-muted',
+        ].join(' ')}>
+          {isProcessing ? 'Analyzing…' : isListening ? 'Listening' : 'Paused'}
         </span>
       </div>
+
+      {/* Recording error — shown below pill when mic is denied or server is down */}
+      {recordingError && (
+        <div className="mx-3 mb-1 px-[11px] py-[7px] bg-red-50 border border-red-200 rounded-[7px]">
+          <p className="text-[10.5px] text-red-600 leading-[1.4] font-sans">{recordingError}</p>
+        </div>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 px-2 pt-2 pb-1 flex flex-col gap-[1px] overflow-y-auto">
@@ -122,14 +143,25 @@ export default function Sidebar({ activeSection, setActiveSection, isListening, 
       <div className="p-3 border-t border-hark-border-light">
         <button
           onClick={onToggleListening}
+          disabled={isProcessing}
           className={[
-            'w-full px-3 py-2 rounded-[9px] border-[1.5px] text-[12.5px] font-medium flex items-center justify-center gap-[6px] transition-all duration-[120ms] cursor-pointer',
-            isListening
-              ? 'border-hark-teal bg-hark-teal text-white hover:bg-hark-teal-dark hover:border-hark-teal-dark'
-              : 'border-hark-border bg-transparent text-hark-muted hover:border-hark-teal-border hover:text-hark-teal',
+            'w-full px-3 py-2 rounded-[9px] border-[1.5px] text-[12.5px] font-medium flex items-center justify-center gap-[6px] transition-all duration-[120ms]',
+            isProcessing
+              ? 'border-hark-border-light bg-hark-bg text-hark-muted cursor-not-allowed'
+              : isListening
+              ? 'border-hark-teal bg-hark-teal text-white hover:bg-hark-teal-dark hover:border-hark-teal-dark cursor-pointer'
+              : 'border-hark-border bg-transparent text-hark-muted hover:border-hark-teal-border hover:text-hark-teal cursor-pointer',
           ].join(' ')}
         >
-          {isListening ? (
+          {isProcessing ? (
+            <>
+              <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              Analyzing
+            </>
+          ) : isListening ? (
             <>
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                 <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.4" />
