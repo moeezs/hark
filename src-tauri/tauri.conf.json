@@ -21,7 +21,8 @@
       "identifier": "io.hark.app",
       "icon": ["icons/icon.png"],
       "macOS": {
-        "minimumSystemVersion": "13.0"
+        "minimumSystemVersion": "13.0",
+        "entitlements": "entitlements.plist"
       }
     },
     "security": {
