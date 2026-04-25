@@ -80,7 +80,6 @@ export default function Sidebar({ activeSection, setActiveSection, isListening, 
         <span className={['text-xs font-medium flex-1', isListening ? 'text-hark-teal-dark' : 'text-hark-muted'].join(' ')}>
           {isListening ? 'Listening' : 'Paused'}
         </span>
-        <span className="font-mono text-[10.5px] text-hark-muted">3h 12m</span>
       </div>
 
       {/* Nav */}
