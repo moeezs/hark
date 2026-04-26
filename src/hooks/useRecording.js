@@ -24,10 +24,16 @@ function getExtension(mimeType) {
  * useRecording — manages the full record → transcribe → extract → save lifecycle.
  *
  * @param {object}   options
- * @param {Function} options.onItemsExtracted  Called with (items[], rawTranscript) after each pause.
+ * @param {Function} options.onItemsExtracted   Called with optimistic items after each pause.
+ * @param {Function} options.onItemsSaved       Called with persisted Snowflake item rows.
+ * @param {Function} options.onItemsSaveFailed  Called with clientKeys[] if Snowflake sync fails.
  * @returns {{ startRecording, stopRecording, isProcessing, error }}
  */
-export function useRecording({ onItemsExtracted }) {
+export function useRecording({
+  onItemsExtracted,
+  onItemsSaved,
+  onItemsSaveFailed,
+}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState(null);
 
@@ -93,26 +99,52 @@ export function useRecording({ onItemsExtracted }) {
         }
 
         const { transcript, items } = await response.json();
+        const extractedItems = Array.isArray(items)
+          ? items.map((item) => ({
+              ...item,
+              clientKey: crypto.randomUUID(),
+            }))
+          : [];
 
-        // ── Save to Snowflake (fire-and-forget — never block the UI) ──────────
+        // ── Surface extracted items to the UI ─────────────────────────────────
+        if (extractedItems.length > 0) {
+          onItemsExtracted(extractedItems, transcript);
+        }
+
+        // ── Save to Snowflake without blocking the pending UI ─────────────────
         if (transcript) {
           fetch(`${SERVER_URL}/save`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               transcript,
-              items,
+              items: extractedItems,
               duration,
               sessionId: SESSION_ID,
             }),
-          }).catch((e) =>
-            console.warn("[hark] Snowflake save failed:", e.message),
-          );
-        }
-
-        // ── Surface extracted items to the UI ─────────────────────────────────
-        if (Array.isArray(items) && items.length > 0) {
-          onItemsExtracted(items, transcript);
+          })
+            .then(async (saveRes) => {
+              if (!saveRes.ok) {
+                const body = await saveRes.json().catch(() => ({}));
+                throw new Error(
+                  body.error || `Snowflake save failed (${saveRes.status})`,
+                );
+              }
+              return saveRes.json();
+            })
+            .then((saved) => {
+              if (Array.isArray(saved.items) && saved.items.length > 0) {
+                onItemsSaved?.(saved.items);
+              }
+            })
+            .catch((e) => {
+              console.warn("[hark] Snowflake save failed:", e.message);
+              onItemsSaveFailed?.(
+                extractedItems.map((item) => item.clientKey),
+                e.message,
+              );
+              setError(e.message);
+            });
         }
       } catch (err) {
         setError(err.message);
@@ -124,7 +156,7 @@ export function useRecording({ onItemsExtracted }) {
 
     // Collect chunks every second so we don't lose data if the tab crashes
     recorder.start(1000);
-  }, [onItemsExtracted]);
+  }, [onItemsExtracted, onItemsSaved, onItemsSaveFailed]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
