@@ -202,6 +202,7 @@ async function ensureSnowflakeSchema(conn) {
     `ALTER TABLE HARK_ITEMS ADD COLUMN IF NOT EXISTS TOPICS VARIANT`,
     `ALTER TABLE HARK_ITEMS ADD COLUMN IF NOT EXISTS TRANSCRIPT_ID VARCHAR(36)`,
     `ALTER TABLE HARK_ITEMS ADD COLUMN IF NOT EXISTS CLIENT_KEY VARCHAR(80)`,
+    `ALTER TABLE HARK_ITEMS ADD COLUMN IF NOT EXISTS DATETIME VARCHAR(120)`,
     `
       CREATE TABLE IF NOT EXISTS HARK_ITEM_ENTITIES (
         ID           VARCHAR(36)   DEFAULT UUID_STRING(),
@@ -265,12 +266,13 @@ function normalizeExtractedItem(item, index) {
   const title = String(item?.title || "").trim().slice(0, 160);
   const quote = String(item?.quote || "").trim().slice(0, 240);
   const context = String(item?.context || "").trim().slice(0, 280);
+  const datetime = String(item?.datetime || "").trim().slice(0, 120);
   const people = uniqueStrings(item?.people).slice(0, 8);
   const topics = uniqueStrings(item?.topics).slice(0, 8);
   const clientKey =
     String(item?.clientKey || "").trim().slice(0, 80) || `item-${index}`;
 
-  return { type, title, quote, context, people, topics, clientKey };
+  return { type, title, quote, context, datetime, people, topics, clientKey };
 }
 
 function parseJsonArray(value) {
@@ -291,6 +293,7 @@ function normalizeItem(r) {
     title: r.TITLE,
     quote: r.QUOTE,
     context: r.CONTEXT || "",
+    datetime: r.DATETIME || "",
     people: parseJsonArray(r.PEOPLE_JSON),
     topics: parseJsonArray(r.TOPICS_JSON),
     confirmed: r.CONFIRMED,
@@ -419,6 +422,18 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
     }
 
     // ── Step 2: Groq/Llama item extraction ───────────────────────────────────
+    const now = new Date();
+    const currentDatetime = now.toLocaleString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
@@ -426,10 +441,12 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
           role: "system",
           content: `You are Hark — an ambient listening assistant that captures important items from live conversations.
 
+The current date and time is: ${currentDatetime}
+
 Your job: extract every actionable or noteworthy item from the transcript. Be thorough — do NOT skip items.
 
 Return ONLY a raw JSON object (no markdown, no code fences, no explanation) in this exact shape:
-{"items": [{"type": "event"|"task"|"note"|"message", "title": "...", "quote": "...", "context": "...", "people": ["..."], "topics": ["..."]}]}
+{"items": [{"type": "event"|"task"|"note"|"message", "title": "...", "quote": "...", "context": "...", "datetime": "...", "people": ["..."], "topics": ["..."]}]}
 
 ## Types
 - "event"   → meetings, appointments, calls, parties, deadlines with a date or time
@@ -441,6 +458,7 @@ Return ONLY a raw JSON object (no markdown, no code fences, no explanation) in t
 - title: specific and actionable, 80 chars max. Start with a verb when possible (e.g. "Schedule dentist appointment for Tuesday", "Email Sarah the project summary")
 - quote: the EXACT verbatim phrase from the transcript that triggered this item, 100 chars max. Copy word-for-word.
 - context: a search-friendly sentence explaining why this matters, 120 chars max. Include relevant details like dates, locations, amounts. Example: "Dentist visit scheduled via phone call, needs to confirm insurance"
+- datetime: For "event" and "task" types ONLY. The resolved date and time in this EXACT format: "April 26, 2026 at 3:00 PM". Use the current date/time above to resolve relative references like "tomorrow", "next Tuesday", "in 2 hours", "this Friday at 3pm". If no specific time is mentioned for events, default to 9:00 AM. For tasks with no time, use 9:00 AM on the mentioned date. If no date or time is mentioned at all, leave as empty string "".
 - people: EVERY person, team, or company explicitly named in the transcript related to this item. Use their name as spoken (e.g. ["Sarah", "Dr. Martinez", "Acme Corp", "the design team"]). NEVER leave empty if any name appears in the transcript. Do NOT use pronouns like "he", "she", "they".
 - topics: 1–4 searchable keyword phrases, lowercase. Think: what would someone type to find this later? (e.g. ["dentist appointment", "insurance", "tuesday schedule"]). NEVER leave empty — always infer the subject matter.
 
@@ -450,10 +468,11 @@ Return ONLY a raw JSON object (no markdown, no code fences, no explanation) in t
 3. topics array MUST always have at least 1 topic — derive from the subject matter
 4. Do NOT invent names, dates, or facts not present in the transcript
 5. If truly nothing notable was said, return {"items": []}
+6. ALWAYS resolve relative dates/times ("tomorrow", "next week", "in an hour") to absolute dates using the current date/time provided above. The datetime format MUST be: "Month Day, Year at H:MM AM/PM" (e.g. "April 26, 2026 at 3:00 PM")
 
 ## Example
 Transcript: "Hey remind me to call Sarah about the marketing deck by Friday. Oh and tell Jake that the standup is moved to 3pm."
-Output: {"items": [{"type": "task", "title": "Call Sarah about the marketing deck by Friday", "quote": "remind me to call Sarah about the marketing deck by Friday", "context": "Follow-up call needed with Sarah regarding marketing deck before Friday deadline", "people": ["Sarah"], "topics": ["marketing deck", "friday deadline", "follow-up call"]}, {"type": "message", "title": "Tell Jake standup moved to 3pm", "quote": "tell Jake that the standup is moved to 3pm", "context": "Daily standup meeting time changed to 3pm, Jake needs to be informed", "people": ["Jake"], "topics": ["standup meeting", "schedule change"]}]}`,
+Output: {"items": [{"type": "task", "title": "Call Sarah about the marketing deck by Friday", "quote": "remind me to call Sarah about the marketing deck by Friday", "context": "Follow-up call needed with Sarah regarding marketing deck before Friday deadline", "datetime": "April 25, 2026 at 9:00 AM", "people": ["Sarah"], "topics": ["marketing deck", "friday deadline", "follow-up call"]}, {"type": "message", "title": "Tell Jake standup moved to 3pm", "quote": "tell Jake that the standup is moved to 3pm", "context": "Daily standup meeting time changed to 3pm, Jake needs to be informed", "datetime": "", "people": ["Jake"], "topics": ["standup meeting", "schedule change"]}]}`,
         },
         {
           role: "user",
@@ -533,10 +552,10 @@ app.post("/save", async (req, res) => {
         conn,
         `
           INSERT INTO HARK_ITEMS (
-            ID, TYPE, TITLE, QUOTE, CONTEXT, PEOPLE, TOPICS,
+            ID, TYPE, TITLE, QUOTE, CONTEXT, DATETIME, PEOPLE, TOPICS,
             CONFIRMED, SESSION_ID, TRANSCRIPT_ID, CLIENT_KEY
           )
-          SELECT ?, ?, ?, ?, ?, PARSE_JSON(?), PARSE_JSON(?), FALSE, ?, ?, ?
+          SELECT ?, ?, ?, ?, ?, ?, PARSE_JSON(?), PARSE_JSON(?), FALSE, ?, ?, ?
         `,
         [
           itemId,
@@ -544,6 +563,7 @@ app.post("/save", async (req, res) => {
           item.title,
           item.quote,
           item.context,
+          item.datetime || "",
           JSON.stringify(item.people),
           JSON.stringify(item.topics),
           sid,
@@ -580,6 +600,7 @@ app.post("/save", async (req, res) => {
         title: item.title,
         quote: item.quote,
         context: item.context,
+        datetime: item.datetime || "",
         people: item.people,
         topics: item.topics,
         confirmed: false,
@@ -609,7 +630,8 @@ app.get("/items", async (req, res) => {
       conn.execute({
         sqlText: `
           SELECT ID, TYPE, TITLE, QUOTE, CONFIRMED, SESSION_ID,
-                 CONTEXT, COALESCE(TO_JSON(PEOPLE), '[]') AS PEOPLE_JSON,
+                 CONTEXT, DATETIME,
+                 COALESCE(TO_JSON(PEOPLE), '[]') AS PEOPLE_JSON,
                  COALESCE(TO_JSON(TOPICS), '[]') AS TOPICS_JSON,
                  TRANSCRIPT_ID, CLIENT_KEY,
                  TO_CHAR(CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS CREATED_AT
@@ -637,7 +659,8 @@ app.get("/items/pending", async (req, res) => {
       conn.execute({
         sqlText: `
           SELECT ID, TYPE, TITLE, QUOTE, CONFIRMED, SESSION_ID,
-                 CONTEXT, COALESCE(TO_JSON(PEOPLE), '[]') AS PEOPLE_JSON,
+                 CONTEXT, DATETIME,
+                 COALESCE(TO_JSON(PEOPLE), '[]') AS PEOPLE_JSON,
                  COALESCE(TO_JSON(TOPICS), '[]') AS TOPICS_JSON,
                  TRANSCRIPT_ID, CLIENT_KEY,
                  TO_CHAR(CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS CREATED_AT
@@ -666,7 +689,7 @@ app.get("/items/search", async (req, res) => {
     const rows = await executeStatement(
       conn,
       `
-        SELECT ID, TYPE, TITLE, QUOTE, CONTEXT, CONFIRMED, SESSION_ID,
+        SELECT ID, TYPE, TITLE, QUOTE, CONTEXT, DATETIME, CONFIRMED, SESSION_ID,
                COALESCE(TO_JSON(PEOPLE), '[]') AS PEOPLE_JSON,
                COALESCE(TO_JSON(TOPICS), '[]') AS TOPICS_JSON,
                TRANSCRIPT_ID, CLIENT_KEY,

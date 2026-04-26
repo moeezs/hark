@@ -101,6 +101,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             set_listening,
             native_integrations::add_to_notes,
+            native_integrations::draft_message,
+            native_integrations::add_to_calendar,
+            native_integrations::add_to_reminders,
         ])
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {

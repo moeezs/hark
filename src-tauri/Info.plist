@@ -5,6 +5,8 @@
   <key>NSMicrophoneUsageDescription</key>
   <string>Hark needs access to your microphone to listen to ambient conversations and extract notes, events, and tasks.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Hark uses the Notes app to save the items you confirm from the pending queue.</string>
+  <string>Hark uses Apple Notes, Messages, and Calendar to save items you confirm.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Hark adds events you confirm to your Apple Calendar.</string>
 </dict>
 </plist>

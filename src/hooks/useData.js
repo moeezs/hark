@@ -10,17 +10,33 @@ const SERVER_URL = "http://127.0.0.1:3847";
 async function dispatchToNative(card) {
   if (!window.__TAURI__) return;
 
-  if (card.type !== "note") {
-    // Calendar/Reminders/Messages — not implemented yet, intentional no-op.
-    return;
-  }
-
   const { invoke } = window.__TAURI__.tauri;
-  const body = card.context || card.quote || "";
-  return invoke("add_to_notes", {
-    entryTitle: card.title,
-    entryBody: body,
-  });
+
+  switch (card.type) {
+    case "note":
+      return invoke("add_to_notes", {
+        entryTitle: card.title,
+        entryBody: card.context || card.quote || "",
+      });
+    case "message":
+      return invoke("draft_message", {
+        messageBody: card.context || card.quote || card.title,
+      });
+    case "event":
+      return invoke("add_to_calendar", {
+        title: card.title,
+        startDate: card.datetime || "",
+        notes: card.quote || card.context || "",
+      });
+    case "task":
+      return invoke("add_to_reminders", {
+        title: card.title,
+        dueDate: card.datetime || null,
+        notes: card.quote || card.context || "",
+      });
+    default:
+      return;
+  }
 }
 
 function actionForType(type) {
@@ -60,6 +76,7 @@ function toCard(item, overrides = {}) {
     meta: formatMeta(item.createdAt),
     quote: item.quote || "",
     context: item.context || "",
+    datetime: item.datetime || "",
     people: Array.isArray(item.people) ? item.people : [],
     topics: Array.isArray(item.topics) ? item.topics : [],
     action: actionForType(item.type),
@@ -267,6 +284,7 @@ export function useData() {
             type: item.type || "note",
             quote: item.quote || "",
             context: item.context || "",
+            datetime: item.datetime || "",
             people: item.people || [],
             topics: item.topics || [],
             confirmed: false,

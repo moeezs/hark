@@ -98,3 +98,133 @@ pub fn add_to_notes(entry_title: String, entry_body: Option<String>) -> Result<(
 
     run_osascript(script, &[&entry_title, &body]).map(|_| ())
 }
+
+/// Draft a new iMessage with the given body text and an empty recipient field.
+/// Uses the `sms:` URL scheme which opens Messages.app with the body pre-filled
+/// and the "To" field empty so the user can pick the contact themselves.
+#[tauri::command]
+pub fn draft_message(message_body: String) -> Result<(), String> {
+    // Percent-encode the body for the URL
+    let encoded_body = message_body
+        .replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('\n', "%0A")
+        .replace('&', "%26")
+        .replace('=', "%3D")
+        .replace('#', "%23")
+        .replace('?', "%3F");
+
+    let url = format!("sms:&body={}", encoded_body);
+
+    // Use `open` to launch the URL scheme — no Accessibility permissions needed
+    let output = std::process::Command::new("open")
+        .arg(&url)
+        .output()
+        .map_err(|e| format!("failed to open sms: URL: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("open exited with status {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    Ok(())
+}
+
+/// Create a new event in Apple Calendar via osascript.
+/// `start_date` should be a human-readable date/time string (e.g. "April 26, 2026 at 3:00 PM")
+/// or an ISO datetime. The AppleScript will attempt to parse it.
+/// If `end_date` is not provided, the event defaults to 1 hour duration.
+#[tauri::command]
+pub fn add_to_calendar(
+    title: String,
+    start_date: String,
+    end_date: Option<String>,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let end = end_date.unwrap_or_default();
+    let note_text = notes.unwrap_or_default();
+
+    let script = r#"
+        on run argv
+            set eventTitle to item 1 of argv
+            set startStr to item 2 of argv
+            set endStr to item 3 of argv
+            set eventNotes to item 4 of argv
+
+            -- Parse start date; fall back to "now + 1 hour" if parsing fails
+            set startDate to current date
+            try
+                set startDate to date startStr
+            end try
+
+            -- Parse end date; default to start + 1 hour
+            set endDate to startDate + (1 * hours)
+            if endStr is not "" then
+                try
+                    set endDate to date endStr
+                end try
+            end if
+
+            tell application "Calendar"
+                tell (first calendar whose writable is true)
+                    make new event with properties {summary:eventTitle, start date:startDate, end date:endDate, description:eventNotes}
+                end tell
+            end tell
+        end run
+    "#;
+
+    run_osascript(script, &[&title, &start_date, &end, &note_text]).map(|_| ())
+}
+
+/// Create a new reminder in Apple Reminders via osascript.
+/// `due_date` should be a human-readable date/time string. If blank or unparseable,
+/// the reminder is created with no due date.
+#[tauri::command]
+pub fn add_to_reminders(
+    title: String,
+    due_date: Option<String>,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let due = due_date.unwrap_or_default();
+    let note_text = notes.unwrap_or_default();
+
+    let script = r#"
+        on run argv
+            set reminderTitle to item 1 of argv
+            set dueDateStr to item 2 of argv
+            set reminderNotes to item 3 of argv
+
+            tell application "Reminders"
+                set targetList to default list
+
+                if dueDateStr is "" then
+                    tell targetList
+                        make new reminder with properties {name:reminderTitle, body:reminderNotes}
+                    end tell
+                else
+                    -- Try to parse the due date
+                    set dueDate to missing value
+                    try
+                        set dueDate to date dueDateStr
+                    end try
+
+                    if dueDate is missing value then
+                        tell targetList
+                            make new reminder with properties {name:reminderTitle, body:reminderNotes}
+                        end tell
+                    else
+                        tell targetList
+                            make new reminder with properties {name:reminderTitle, body:reminderNotes, due date:dueDate, remind me date:dueDate}
+                        end tell
+                    end if
+                end if
+            end tell
+        end run
+    "#;
+
+    run_osascript(script, &[&title, &due, &note_text]).map(|_| ())
+}
