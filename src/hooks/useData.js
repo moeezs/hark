@@ -333,10 +333,7 @@ export function useData() {
           // Remove from pending, add to notes
           updatePending((prev) => prev.filter((c) => c.clientKey !== ck));
           setNotes((prev) =>
-            sortByCreatedAtDesc([
-              { ...savedCard, confirmed: true },
-              ...prev,
-            ]),
+            sortByCreatedAtDesc([{ ...savedCard, confirmed: true }, ...prev]),
           );
           // Confirm on server
           fetch(`${SERVER_URL}/items/${savedCard.id}/confirm`, {
@@ -380,6 +377,24 @@ export function useData() {
     [updatePending],
   );
 
+  const deleteNote = useCallback(
+    async (id) => {
+      // Optimistic: remove from notes immediately
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+
+      try {
+        await fetch(`${SERVER_URL}/items/${id}`, { method: "DELETE" });
+        // Refresh people & topics counts after deletion
+        await Promise.all([fetchPeople(), fetchTopics()]);
+      } catch (err) {
+        console.warn("[hark] deleteNote failed:", err.message);
+        // Restore on failure
+        refresh().catch(() => {});
+      }
+    },
+    [fetchPeople, fetchTopics, refresh],
+  );
+
   return {
     notes,
     pending,
@@ -394,6 +409,7 @@ export function useData() {
     addPendingItems,
     reconcilePendingItems,
     markPendingItemsSaveFailed,
+    deleteNote,
     refresh,
   };
 }

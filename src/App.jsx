@@ -27,6 +27,7 @@ export default function App() {
     addPendingItems,
     reconcilePendingItems,
     markPendingItemsSaveFailed,
+    deleteNote,
   } = useData()
 
   // Recording hook — starts/stops mic, sends audio to sidecar, surfaces items
@@ -144,8 +145,8 @@ export default function App() {
           />
         )}
         {activeSection === 'notes'   && <NotesSection notes={notes} transcripts={transcripts} isLoading={isLoading} />}
-        {activeSection === 'people'  && <PeopleSection people={people} />}
-        {activeSection === 'topics'  && <TopicsSection topics={topics} />}
+        {activeSection === 'people'  && <PeopleSection people={people} onDeleteNote={deleteNote} />}
+        {activeSection === 'topics'  && <TopicsSection topics={topics} onDeleteNote={deleteNote} />}
         {activeSection === 'search'  && <SearchSection searchItems={searchItems} />}
       </main>
     </div>

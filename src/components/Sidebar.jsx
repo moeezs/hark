@@ -128,8 +128,11 @@ export default function Sidebar({ activeSection, setActiveSection, isListening, 
                   </span>
                   {item.label}
                   {item.id === 'pending' && pendingCount > 0 && (
-                    <span className="ml-auto bg-hark-teal text-white text-[10px] font-semibold font-mono px-[6px] py-[1px] rounded-full leading-[1.6]">
-                      {pendingCount}
+                    <span className="ml-auto flex items-center gap-[5px]">
+                      <span className="w-[6px] h-[6px] rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                      <span className="bg-amber-400 text-white text-[10px] font-semibold font-mono px-[6px] py-[1px] rounded-full leading-[1.6]">
+                        {pendingCount}
+                      </span>
                     </span>
                   )}
                 </a>

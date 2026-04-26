@@ -263,14 +263,24 @@ function normalizeExtractedItem(item, index) {
   const type = ["event", "task", "note", "message"].includes(item?.type)
     ? item.type
     : "note";
-  const title = String(item?.title || "").trim().slice(0, 160);
-  const quote = String(item?.quote || "").trim().slice(0, 240);
-  const context = String(item?.context || "").trim().slice(0, 280);
-  const datetime = String(item?.datetime || "").trim().slice(0, 120);
+  const title = String(item?.title || "")
+    .trim()
+    .slice(0, 160);
+  const quote = String(item?.quote || "")
+    .trim()
+    .slice(0, 240);
+  const context = String(item?.context || "")
+    .trim()
+    .slice(0, 280);
+  const datetime = String(item?.datetime || "")
+    .trim()
+    .slice(0, 120);
   const people = uniqueStrings(item?.people).slice(0, 8);
   const topics = uniqueStrings(item?.topics).slice(0, 8);
   const clientKey =
-    String(item?.clientKey || "").trim().slice(0, 80) || `item-${index}`;
+    String(item?.clientKey || "")
+      .trim()
+      .slice(0, 80) || `item-${index}`;
 
   return { type, title, quote, context, datetime, people, topics, clientKey };
 }
@@ -305,7 +315,10 @@ function normalizeItem(r) {
 }
 
 function normalizeText(value) {
-  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function tokenizeQuery(query) {
@@ -380,7 +393,10 @@ function normalizeAggregateRows(rows) {
     }
     existing.mentions += 1;
     existing.count += 1;
-    if (row.CREATED_AT && (!existing.lastSeen || row.CREATED_AT > existing.lastSeen)) {
+    if (
+      row.CREATED_AT &&
+      (!existing.lastSeen || row.CREATED_AT > existing.lastSeen)
+    ) {
       existing.lastSeen = row.CREATED_AT;
     }
   }
@@ -522,7 +538,9 @@ app.post("/save", async (req, res) => {
   const sid = sessionId || randomUUID();
   const transcriptId = randomUUID();
   const normalizedItems = Array.isArray(items)
-    ? items.map(normalizeExtractedItem).filter((item) => item.title || item.quote)
+    ? items
+        .map(normalizeExtractedItem)
+        .filter((item) => item.title || item.quote)
     : [];
 
   try {
@@ -706,7 +724,9 @@ app.get("/items/search", async (req, res) => {
       .filter((item) => item.score > 0)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
-        return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+        return String(b.createdAt || "").localeCompare(
+          String(a.createdAt || ""),
+        );
       })
       .slice(0, 100)
       .map(({ score, ...item }) => item);
@@ -774,6 +794,62 @@ app.get("/topics", async (_req, res) => {
     );
   } catch (err) {
     console.error("[/topics error]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /people/:name/items — all confirmed items that mention a specific person
+app.get("/people/:name/items", async (req, res) => {
+  const { name } = req.params;
+  try {
+    const conn = await getSnowflakeConn();
+    const rows = await executeStatement(
+      conn,
+      `
+        SELECT * FROM (
+          SELECT DISTINCT I.ID, I.TYPE, I.TITLE, I.QUOTE, I.CONFIRMED, I.SESSION_ID,
+                 TO_CHAR(I.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS CREATED_AT
+          FROM HARK_ITEMS I
+          JOIN HARK_ITEM_ENTITIES E ON E.ITEM_ID = I.ID
+          WHERE I.CONFIRMED = TRUE
+            AND E.ENTITY_TYPE = 'person'
+            AND LOWER(E.ENTITY_VALUE) = LOWER(?)
+        ) ORDER BY CREATED_AT DESC
+        LIMIT 200
+      `,
+      [name],
+    );
+    res.json(rows.map(normalizeItem));
+  } catch (err) {
+    console.error("[/people/:name/items error]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /topics/:label/items — all confirmed items for a specific topic
+app.get("/topics/:label/items", async (req, res) => {
+  const { label } = req.params;
+  try {
+    const conn = await getSnowflakeConn();
+    const rows = await executeStatement(
+      conn,
+      `
+        SELECT * FROM (
+          SELECT DISTINCT I.ID, I.TYPE, I.TITLE, I.QUOTE, I.CONFIRMED, I.SESSION_ID,
+                 TO_CHAR(I.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS CREATED_AT
+          FROM HARK_ITEMS I
+          JOIN HARK_ITEM_ENTITIES E ON E.ITEM_ID = I.ID
+          WHERE I.CONFIRMED = TRUE
+            AND E.ENTITY_TYPE = 'topic'
+            AND LOWER(E.ENTITY_VALUE) = LOWER(?)
+        ) ORDER BY CREATED_AT DESC
+        LIMIT 200
+      `,
+      [label],
+    );
+    res.json(rows.map(normalizeItem));
+  } catch (err) {
+    console.error("[/topics/:label/items error]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
