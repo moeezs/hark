@@ -7,6 +7,7 @@ import NotesSection from './components/NotesSection'
 import PeopleSection from './components/PeopleSection'
 import TopicsSection from './components/TopicsSection'
 import SearchSection from './components/SearchSection'
+import ChatSection from './components/ChatSection'
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('notes')
@@ -148,6 +149,7 @@ export default function App() {
         {activeSection === 'people'  && <PeopleSection people={people} onDeleteNote={deleteNote} />}
         {activeSection === 'topics'  && <TopicsSection topics={topics} onDeleteNote={deleteNote} />}
         {activeSection === 'search'  && <SearchSection searchItems={searchItems} />}
+        {activeSection === 'chat'    && <ChatSection />}
       </main>
     </div>
   )

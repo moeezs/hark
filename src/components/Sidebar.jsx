@@ -55,6 +55,16 @@ const NAV_GROUPS = [
           </svg>
         ),
       },
+      {
+        id: 'chat',
+        label: 'Ask Hark',
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <path d="M2 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4.5L1.5 14V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <path d="M5 6.5h5M5 9h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+        ),
+      },
     ],
   },
 ]

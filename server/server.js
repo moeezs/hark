@@ -924,6 +924,100 @@ app.get("/transcripts", async (req, res) => {
   }
 });
 
+// POST /chat — AI assistant that answers questions about your captured notes
+app.post("/chat", async (req, res) => {
+  const { messages } = req.body;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: "messages array required" });
+  }
+
+  try {
+    const conn = await getSnowflakeConn();
+
+    // Pull all confirmed items as context for the AI
+    const itemRows = await executeStatement(
+      conn,
+      `
+        SELECT ID, TYPE, TITLE, QUOTE, CONTEXT, DATETIME,
+               COALESCE(TO_JSON(PEOPLE), '[]') AS PEOPLE_JSON,
+               COALESCE(TO_JSON(TOPICS), '[]') AS TOPICS_JSON,
+               TO_CHAR(CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS CREATED_AT
+        FROM HARK_ITEMS
+        WHERE CONFIRMED = TRUE
+        ORDER BY CREATED_AT DESC
+        LIMIT 400
+      `,
+    );
+
+    const items = itemRows.map(normalizeItem);
+
+    const now = new Date();
+    const currentDatetime = now.toLocaleString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    const contextLines = items.map((item, i) => {
+      const ts = item.createdAt
+        ? new Date(item.createdAt).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })
+        : "unknown time";
+      const people = item.people.length
+        ? ` | people: ${item.people.join(", ")}`
+        : "";
+      const topics = item.topics.length
+        ? ` | topics: ${item.topics.join(", ")}`
+        : "";
+      const ctx = item.context ? ` | context: ${item.context}` : "";
+      const when = item.datetime ? ` | when: ${item.datetime}` : "";
+      return `[${i + 1}] [${ts}] [${item.type.toUpperCase()}] ${item.title}${when}${ctx}${people}${topics}`;
+    });
+
+    const systemPrompt = `You are Hark — a smart personal assistant that helps users recall and act on information captured from their ambient listening sessions. You have full access to everything the user has confirmed from their conversations.
+
+Current date and time: ${currentDatetime}
+
+## Captured Items (${items.length} total, newest first):
+${contextLines.length > 0 ? contextLines.join("\n") : "(no confirmed items yet)"}
+
+## How to respond:
+- Answer naturally and conversationally. Be direct and helpful.
+- When listing items, use bullet points or numbered lists for scannability.
+- Always reference specific details: timestamps, people names, exact titles.
+- Filter by time when asked ("today", "an hour ago", "this week") using the [timestamp] field.
+- If asked about upcoming events, check the "when" fields and compare to today's date.
+- If no relevant items match, say so honestly — never fabricate.
+- Keep responses concise. If there are many results, summarize and list the most relevant.
+- For birthday/party questions, look for event items with "birthday" or "party" in topics/title.`;
+
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
+      temperature: 0.3,
+      max_tokens: 1024,
+    });
+
+    const reply =
+      completion.choices[0]?.message?.content ||
+      "I couldn't find an answer right now.";
+    res.json({ reply });
+  } catch (err) {
+    console.error("[/chat error]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 if (require.main === module) {
