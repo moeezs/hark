@@ -33,3 +33,4 @@ build/
 # py2app
 app/dist/
 app/build/
+server/snowflake.log

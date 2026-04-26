@@ -51,7 +51,9 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
 // ── Gemini (item extraction) ──────────────────────────────────────────────────
 
 const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemma-3-27b-it";
+// gemma-3n-e4b-it is the lightweight edge model — much faster than 27b/12b.
+// Change GEMINI_MODEL in .env to swap (e.g. gemini-2.0-flash, gemma-3-12b-it).
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemma-3n-e4b-it";
 
 // ── Snowflake ─────────────────────────────────────────────────────────────────
 
@@ -156,8 +158,13 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
       return res.json({ transcript: "", items: [], duration });
     }
 
-    // ── Step 2: Gemini item extraction ───────────────────────────────────────
-    const extractionPrompt = `You are Hark — an ambient listening assistant. From a conversation transcript, extract only the most important actionable items.
+    // ── Step 2: Groq/Llama item extraction ───────────────────────────────────
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: `You are Hark — an ambient listening assistant. From a conversation transcript, extract only the most important actionable items.
 
 Return ONLY a raw JSON object (no markdown, no explanation) in this exact shape:
 {"items": [{"type": "event"|"task"|"note"|"message", "title": "...", "quote": "..."}]}
@@ -169,24 +176,40 @@ Rules:
 - type "message" — something to relay or communicate to someone else
 - title: concise, 80 chars max, specific and actionable
 - quote: the verbatim phrase from the transcript that triggered this, 100 chars max
-- Only extract genuinely important items. If nothing notable, return {"items": []}
-
-Transcript:
-"${rawTranscript}"`;
-
-    const geminiResult = await gemini.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: extractionPrompt,
-      config: { responseMimeType: "application/json" },
+- Only extract genuinely important items. If nothing notable, return {"items": []}`,
+        },
+        {
+          role: "user",
+          content: `Transcript:\n"${rawTranscript}"`,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: 1024,
     });
 
     let items = [];
     try {
-      const parsed = JSON.parse(geminiResult.text);
+      const parsed = JSON.parse(completion.choices[0].message.content);
       items = Array.isArray(parsed.items) ? parsed.items : [];
     } catch {
-      console.warn("[hark-server] Could not parse Gemini extraction JSON");
+      console.warn("[hark-server] Could not parse Llama extraction JSON");
     }
+
+    // ── GEMINI FALLBACK (swap back by uncommenting this + commenting Groq above)
+    // const extractionPrompt = `You are Hark — an ambient listening assistant...
+    //   (same prompt as above)
+    //   Transcript:\n"${rawTranscript}"`;
+    // const geminiResult = await gemini.models.generateContent({
+    //   model: GEMINI_MODEL,
+    //   contents: extractionPrompt,
+    //   config: { responseMimeType: "application/json", temperature: 0 },
+    // });
+    // let items = [];
+    // try {
+    //   const parsed = JSON.parse(geminiResult.text);
+    //   items = Array.isArray(parsed.items) ? parsed.items : [];
+    // } catch { console.warn("[hark-server] Could not parse Gemini JSON"); }
 
     cleanup();
     res.json({ transcript: rawTranscript, items, duration });
