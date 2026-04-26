@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRecording } from './hooks/useRecording'
+import { useData } from './hooks/useData'
 import Sidebar from './components/Sidebar'
 import PendingSection from './components/PendingSection'
 import NotesSection from './components/NotesSection'
@@ -7,64 +8,40 @@ import PeopleSection from './components/PeopleSection'
 import TopicsSection from './components/TopicsSection'
 import SearchSection from './components/SearchSection'
 
-function actionForType(type) {
-  switch (type) {
-    case 'event':   return 'Add to Calendar'
-    case 'task':    return 'Add to Reminders'
-    case 'message': return 'Draft Message'
-    default:        return 'Save to Notes'
-  }
-}
-
-const INITIAL_PENDING = [
-  {
-    id: 1,
-    title: 'Dinner with Jake — Friday at 8pm, Giulia restaurant',
-    type: 'event',
-    meta: 'Caught at 2:34 pm · Today',
-    quote: '"yeah let\'s do Giulia on Friday, maybe 8 o\'clock?"',
-    action: 'Add to Calendar',
-  },
-  {
-    id: 2,
-    title: 'Call the realtor tomorrow morning',
-    type: 'task',
-    meta: 'Caught at 2:34 pm · Today',
-    quote: '"I keep forgetting to call my realtor, I\'ll do it tomorrow"',
-    action: 'Add to Reminders',
-  },
-  {
-    id: 3,
-    title: "Alex's new address is 42 Harbord St, second floor",
-    type: 'note',
-    meta: 'Caught at 11:08 am · Today',
-    quote: '"I moved last month, it\'s 42 Harbord, second floor, buzz 04"',
-    action: 'Save to Notes',
-  },
-]
-
 export default function App() {
   const [activeSection, setActiveSection] = useState('notes')
   const [isListening, setIsListening] = useState(false)
-  const [pendingCards, setPendingCards] = useState(INITIAL_PENDING)
   const [removingIds, setRemovingIds] = useState(new Set())
   const [confirmedIds, setConfirmedIds] = useState(new Set())
 
+  const {
+    notes,
+    pending,
+    people,
+    topics,
+    transcripts,
+    isLoading,
+    confirmItem,
+    dismissItem,
+    searchItems,
+    addPendingItems,
+    reconcilePendingItems,
+    markPendingItemsSaveFailed,
+  } = useData()
+
   // Recording hook — starts/stops mic, sends audio to sidecar, surfaces items
   const { startRecording, stopRecording, isProcessing, error: recordingError } = useRecording({
-    onItemsExtracted: useCallback((items, _transcript) => {
-      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      const newCards = items.map((item, i) => ({
-        id:     Date.now() + i,
-        title:  item.title,
-        type:   item.type || 'note',
-        meta:   `Caught at ${timeStr} · Today`,
-        quote:  item.quote || '',
-        action: actionForType(item.type),
-      }))
-      setPendingCards((prev) => [...newCards, ...prev])
+    onItemsExtracted: useCallback((items) => {
+      addPendingItems(items)
       setActiveSection('pending')
-    }, []),
+    }, [addPendingItems]),
+    onItemsSaved: useCallback((items) => {
+      reconcilePendingItems(items)
+    }, [reconcilePendingItems]),
+    onItemsSaveFailed: useCallback((clientKeys) => {
+      markPendingItemsSaveFailed(clientKeys)
+      setActiveSection('pending')
+    }, [markPendingItemsSaveFailed]),
   })
 
   // Sync isListening state → actual mic recording
@@ -112,7 +89,7 @@ export default function App() {
   const dismissCard = (id) => {
     setRemovingIds((prev) => new Set([...prev, id]))
     setTimeout(() => {
-      setPendingCards((prev) => prev.filter((c) => c.id !== id))
+      dismissItem(id)
       setRemovingIds((prev) => {
         const next = new Set(prev)
         next.delete(id)
@@ -124,7 +101,7 @@ export default function App() {
   const confirmCard = (id) => {
     setConfirmedIds((prev) => new Set([...prev, id]))
     setTimeout(() => {
-      dismissCard(id)
+      confirmItem(id)
       setConfirmedIds((prev) => {
         const next = new Set(prev)
         next.delete(id)
@@ -142,24 +119,24 @@ export default function App() {
         setActiveSection={setActiveSection}
         isListening={isListening}
         onToggleListening={handleToggleListening}
-        pendingCount={pendingCards.length}
+        pendingCount={pending.length}
         isProcessing={isProcessing}
         recordingError={recordingError}
       />
       <main className="flex-1 flex flex-col min-h-0 bg-hark-bg">
         {activeSection === 'pending' && (
           <PendingSection
-            cards={pendingCards}
+            cards={pending}
             removingIds={removingIds}
             confirmedIds={confirmedIds}
             onDismiss={dismissCard}
             onConfirm={confirmCard}
           />
         )}
-        {activeSection === 'notes' && <NotesSection />}
-        {activeSection === 'people' && <PeopleSection />}
-        {activeSection === 'topics' && <TopicsSection />}
-        {activeSection === 'search' && <SearchSection />}
+        {activeSection === 'notes'   && <NotesSection notes={notes} transcripts={transcripts} isLoading={isLoading} />}
+        {activeSection === 'people'  && <PeopleSection people={people} />}
+        {activeSection === 'topics'  && <TopicsSection topics={topics} />}
+        {activeSection === 'search'  && <SearchSection searchItems={searchItems} />}
       </main>
     </div>
   )
