@@ -358,8 +358,20 @@ export function useRecording({
       monitorRef.current = null;
     }
 
-    // Stop any active recording
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+    // If we were mid-speech when stopped, ship what was recorded
+    const currentVadState = vadStateRef.current;
+    if (
+      (currentVadState === VAD_SPEAKING || currentVadState === VAD_SILENCE) &&
+      recorderRef.current &&
+      recorderRef.current.state !== "inactive"
+    ) {
+      // stopAndShip handles onstop + processSegment; it nulls recorderRef itself
+      stopAndShip();
+    } else if (
+      recorderRef.current &&
+      recorderRef.current.state !== "inactive"
+    ) {
+      // Was in idle/confirming — discard, nothing worth analyzing
       recorderRef.current.stop();
       recorderRef.current = null;
     }
@@ -382,7 +394,7 @@ export function useRecording({
     chunksRef.current = [];
 
     console.log("[hark-vad] ⏹ 24/7 listening stopped");
-  }, []);
+  }, [stopAndShip]);
 
   return { startRecording, stopRecording, isProcessing, error };
 }
