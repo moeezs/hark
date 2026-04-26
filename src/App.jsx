@@ -95,19 +95,29 @@ export default function App() {
         next.delete(id)
         return next
       })
-    }, 180)
+    }, 260)
   }
 
   const confirmCard = (id) => {
+    // Immediate visual response: hide dismiss, swap label to ✓ Done,
+    // and start fading the card out. No awaiting of osascript or the network —
+    // dispatch and Snowflake confirm happen in the background.
     setConfirmedIds((prev) => new Set([...prev, id]))
+    setRemovingIds((prev) => new Set([...prev, id]))
+
     setTimeout(() => {
       confirmItem(id)
+      setRemovingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
       setConfirmedIds((prev) => {
         const next = new Set(prev)
         next.delete(id)
         return next
       })
-    }, 600)
+    }, 260)
   }
 
   return (
