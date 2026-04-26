@@ -90,8 +90,10 @@ export function useRecording({
       const mime = mimeTypeRef.current || "audio/webm";
       const ext = getExtension(mime);
 
-      // Skip tiny clips
-      if (blob.size < 500 || duration < 0.5) {
+      // Skip clips that are too small to contain real audio frames.
+      // A WebM/ogg file with only the initialization header (no audio) is
+      // typically 3-8 KB — anything under 8 KB is unlikely to be valid.
+      if (blob.size < 8000 || duration < 0.5) {
         console.log(
           "[hark-vad] skipping tiny clip:",
           blob.size,
@@ -391,7 +393,9 @@ export function useRecording({
     analyserRef.current = null;
     dataArrayRef.current = null;
     vadStateRef.current = VAD_IDLE;
-    chunksRef.current = [];
+    // NOTE: do NOT clear chunksRef here — if stopAndShip() was called above,
+    // its async onstop handler still needs the chunks to build the blob.
+    // onstop clears chunksRef itself after the blob is built.
 
     console.log("[hark-vad] ⏹ 24/7 listening stopped");
   }, [stopAndShip]);

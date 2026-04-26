@@ -421,14 +421,38 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
   try {
     const duration = parseFloat(req.body.duration || "0");
 
+    // ── Guard: reject clips that are too small to be valid audio ─────────────
+    // WebM/ogg files with only the init segment (no audio frames) are ~3-8KB.
+    const { size: fileSize } = fs.statSync(audioPath);
+    if (fileSize < 8000) {
+      console.log(
+        `[hark-server] audio too small (${fileSize} bytes) — skipping`,
+      );
+      cleanup();
+      return res.json({ transcript: "", items: [], duration });
+    }
+
     // ── Step 1: Whisper transcription ─────────────────────────────────────────
-    const transcription = await groq.audio.transcriptions.create({
-      file: fs.createReadStream(audioPath),
-      model: "whisper-large-v3-turbo",
-      response_format: "json",
-      language: "en",
-      temperature: 0,
-    });
+    let transcription;
+    try {
+      transcription = await groq.audio.transcriptions.create({
+        file: fs.createReadStream(audioPath),
+        model: "whisper-large-v3-turbo",
+        response_format: "json",
+        language: "en",
+        temperature: 0,
+      });
+    } catch (whisperErr) {
+      // Groq returns 400 for malformed/empty audio — treat as silence, not an error
+      if (whisperErr.status === 400 || whisperErr.message?.includes("400")) {
+        console.log(
+          `[hark-server] Groq rejected audio (invalid media, ${fileSize} bytes) — skipping`,
+        );
+        cleanup();
+        return res.json({ transcript: "", items: [], duration });
+      }
+      throw whisperErr; // re-throw unexpected errors
+    }
 
     const rawTranscript = (transcription.text || "").trim();
 
@@ -468,7 +492,14 @@ Return ONLY a raw JSON object (no markdown, no code fences, no explanation) in t
 - "event"   → meetings, appointments, calls, parties, deadlines with a date or time
 - "task"    → action items, to-dos, follow-ups, things someone said they need/want to do
 - "note"    → important facts, decisions, preferences, personal info worth remembering
-- "message" → something to tell, relay, or communicate to another person
+- "message" → ANY intent to draft, write, send, text, or communicate something to someone. This includes: "draft a message", "I need to text X", "send a message to X", "remind me to email X", "write to X", "let X know", "shoot X a message", "DM X", "WhatsApp X", or any phrasing where the user wants to compose or send written communication. ALWAYS use "message" when the core action is sending or drafting written communication — even if it sounds like a task.
+
+## Multi-item rule (IMPORTANT)
+A single sentence can produce MORE than one item if it contains multiple intents. The most common case:
+- If a message/text needs to be sent BY a specific time → emit TWO items from the same quote:
+  1. type "message" — capturing what needs to be sent and to whom
+  2. type "task" — capturing the deadline reminder (e.g. "Send message to X by 1pm"), with datetime resolved to that deadline
+- Similarly, if someone says "remind me to email X by 3pm", extract both the message intent AND the timed reminder task.
 
 ## Field rules
 - title: specific and actionable, 80 chars max. Start with a verb when possible (e.g. "Schedule dentist appointment for Tuesday", "Email Sarah the project summary")
@@ -480,15 +511,16 @@ Return ONLY a raw JSON object (no markdown, no code fences, no explanation) in t
 
 ## Critical rules
 1. Extract ALL noteworthy items — err on the side of including more rather than fewer
-2. people array MUST contain every name mentioned in relation to the item — never empty if names exist
-3. topics array MUST always have at least 1 topic — derive from the subject matter
-4. Do NOT invent names, dates, or facts not present in the transcript
-5. If truly nothing notable was said, return {"items": []}
-6. ALWAYS resolve relative dates/times ("tomorrow", "next week", "in an hour") to absolute dates using the current date/time provided above. The datetime format MUST be: "Month Day, Year at H:MM AM/PM" (e.g. "April 26, 2026 at 3:00 PM")
+2. A single utterance CAN and SHOULD produce multiple items when multiple intents are present (see Multi-item rule above)
+3. people array MUST contain every name mentioned in relation to the item — never empty if names exist
+4. topics array MUST always have at least 1 topic — derive from the subject matter
+5. Do NOT invent names, dates, or facts not present in the transcript
+6. If truly nothing notable was said, return {"items": []}
+7. ALWAYS resolve relative dates/times ("tomorrow", "next week", "in an hour") to absolute dates using the current date/time provided above. The datetime format MUST be: "Month Day, Year at H:MM AM/PM" (e.g. "April 26, 2026 at 3:00 PM")
 
 ## Example
-Transcript: "Hey remind me to call Sarah about the marketing deck by Friday. Oh and tell Jake that the standup is moved to 3pm."
-Output: {"items": [{"type": "task", "title": "Call Sarah about the marketing deck by Friday", "quote": "remind me to call Sarah about the marketing deck by Friday", "context": "Follow-up call needed with Sarah regarding marketing deck before Friday deadline", "datetime": "April 25, 2026 at 9:00 AM", "people": ["Sarah"], "topics": ["marketing deck", "friday deadline", "follow-up call"]}, {"type": "message", "title": "Tell Jake standup moved to 3pm", "quote": "tell Jake that the standup is moved to 3pm", "context": "Daily standup meeting time changed to 3pm, Jake needs to be informed", "datetime": "", "people": ["Jake"], "topics": ["standup meeting", "schedule change"]}]}`,
+Transcript: "I need to message Jake about the budget by 1pm. And remind me to call Sarah about the marketing deck by Friday."
+Output: {"items": [{"type": "message", "title": "Message Jake about the budget", "quote": "I need to message Jake about the budget by 1pm", "context": "Jake needs to be messaged about the budget before 1pm today", "datetime": "", "people": ["Jake"], "topics": ["budget", "message jake"]}, {"type": "task", "title": "Send message to Jake about budget by 1pm", "quote": "I need to message Jake about the budget by 1pm", "context": "Deadline to message Jake about budget is 1pm today", "datetime": "April 26, 2026 at 1:00 PM", "people": ["Jake"], "topics": ["budget", "deadline", "message reminder"]}, {"type": "task", "title": "Call Sarah about the marketing deck by Friday", "quote": "remind me to call Sarah about the marketing deck by Friday", "context": "Follow-up call needed with Sarah regarding marketing deck before Friday deadline", "datetime": "April 26, 2026 at 9:00 AM", "people": ["Sarah"], "topics": ["marketing deck", "friday deadline", "follow-up call"]}]}`,
         },
         {
           role: "user",
