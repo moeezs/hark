@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod native_integrations;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{
@@ -96,7 +98,10 @@ fn main() {
         .manage(ListeningState(Mutex::new(false)))
         .manage(ServerChild(Mutex::new(server_child)))
         .system_tray(tray)
-        .invoke_handler(tauri::generate_handler![set_listening])
+        .invoke_handler(tauri::generate_handler![
+            set_listening,
+            native_integrations::add_to_notes,
+        ])
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                 "open" => {

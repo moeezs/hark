@@ -2,6 +2,27 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 const SERVER_URL = "http://127.0.0.1:3847";
 
+// Dispatch a confirmed card to a native macOS app via Tauri.
+// Only `note`-type cards have a working native integration today; the other
+// types still confirm in Snowflake but skip the native step until their
+// integrations are wired in a follow-up.
+// In a non-Tauri context (e.g. plain browser dev), every type is a no-op.
+async function dispatchToNative(card) {
+  if (!window.__TAURI__) return;
+
+  if (card.type !== "note") {
+    // Calendar/Reminders/Messages — not implemented yet, intentional no-op.
+    return;
+  }
+
+  const { invoke } = window.__TAURI__.tauri;
+  const body = card.context || card.quote || "";
+  return invoke("add_to_notes", {
+    entryTitle: card.title,
+    entryBody: body,
+  });
+}
+
 function actionForType(type) {
   switch (type) {
     case "event":
@@ -145,44 +166,52 @@ export function useData() {
     refresh().finally(() => setIsLoading(false));
   }, [refresh]);
 
+  // Confirm a pending card. Removes from pending, adds to notes feed, fires
+  // native dispatch in the background, and confirms on Snowflake in the
+  // background. Returns immediately so callers can drive the fade animation
+  // without waiting on osascript or the network.
   const confirmItem = useCallback(
-    async (id) => {
-      // Read from pendingRef synchronously — no closure issues
-      const currentPending = pendingRef.current;
-      const card = currentPending.find((c) => c.id === id);
+    (id) => {
+      const card = pendingRef.current.find((c) => c.id === id);
       if (!card) {
         console.warn("[hark] confirmItem: card not found for id", id);
         return;
       }
 
-      // Remove from pending, add to notes — do this immediately
+      // Move card from pending to notes immediately
       updatePending((prev) => prev.filter((c) => c.id !== id));
       setNotes((prev) =>
         sortByCreatedAtDesc([{ ...card, confirmed: true }, ...prev]),
       );
 
+      // Native dispatch — fire and forget. If it fails, surface the error
+      // but don't put the card back; the user already moved on.
+      dispatchToNative(card).catch((err) => {
+        console.warn("[hark] native dispatch failed:", err);
+        setError(
+          typeof err === "string"
+            ? err
+            : err?.message || "Native dispatch failed",
+        );
+      });
+
+      // Snowflake confirm — also background.
       if (id.startsWith("local-")) {
-        // Save hasn't finished yet — track the clientKey for deferred confirm
         if (card.clientKey) {
           confirmedClientKeysRef.current.add(card.clientKey);
-          console.log("[hark] deferred confirm for clientKey", card.clientKey);
         }
-      } else {
-        // Real Snowflake ID — confirm on server right now
-        try {
-          console.log("[hark] confirming on server:", id);
-          const res = await fetch(`${SERVER_URL}/items/${id}/confirm`, {
-            method: "POST",
-          });
+        return;
+      }
+
+      fetch(`${SERVER_URL}/items/${id}/confirm`, { method: "POST" })
+        .then((res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          console.log("[hark] confirmed on server:", id);
-          // Refresh people and topics after confirming
-          await Promise.all([fetchPeople(), fetchTopics()]);
-        } catch (err) {
+          return Promise.all([fetchPeople(), fetchTopics()]);
+        })
+        .catch((err) => {
           console.warn("[hark] confirm failed:", err.message);
           refresh().catch(() => {});
-        }
-      }
+        });
     },
     [updatePending, fetchPeople, fetchTopics, refresh],
   );

@@ -32,9 +32,15 @@ export default function PendingSection({ cards, removingIds, confirmedIds, onDis
                   key={card.id}
                   className={[
                     'bg-hark-surface border border-hark-border rounded-[9px] p-[18px]',
-                    'transition-all duration-[180ms] hover:shadow-[0_2px_14px_rgba(0,0,0,0.06)]',
-                    isRemoving ? 'opacity-0 -translate-x-2' : 'opacity-100 translate-x-0',
+                    'hover:shadow-[0_2px_14px_rgba(0,0,0,0.06)] transition-shadow duration-[120ms]',
+                    'will-change-[opacity,transform]',
+                    isRemoving ? 'opacity-0 scale-[0.985]' : 'opacity-100 scale-100',
                   ].join(' ')}
+                  style={{
+                    transitionProperty: 'opacity, transform',
+                    transitionDuration: '260ms',
+                    transitionTimingFunction: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+                  }}
                 >
                   {/* Top row */}
                   <div className="flex items-start justify-between gap-3 mb-[5px]">
@@ -61,12 +67,14 @@ export default function PendingSection({ cards, removingIds, confirmedIds, onDis
                     >
                       {isConfirmed ? '✓ Done' : card.action}
                     </button>
-                    <button
-                      onClick={() => onDismiss(card.id)}
-                      className="px-[10px] py-[6.5px] bg-transparent text-hark-muted border-none text-xs cursor-pointer rounded-[6px] transition-colors duration-100 hover:text-hark-text-2 hover:bg-hark-bg font-sans"
-                    >
-                      Dismiss
-                    </button>
+                    {!isConfirmed && (
+                      <button
+                        onClick={() => onDismiss(card.id)}
+                        className="px-[10px] py-[6.5px] bg-transparent text-hark-muted border-none text-xs cursor-pointer rounded-[6px] transition-colors duration-100 hover:text-hark-text-2 hover:bg-hark-bg font-sans"
+                      >
+                        Dismiss
+                      </button>
+                    )}
                   </div>
                 </div>
               )
